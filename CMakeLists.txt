@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12) # Don't bump this version for no reason
+cmake_minimum_required(VERSION 3.13)  # for add_link_options
 project("llama.cpp" C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -44,7 +44,7 @@ endif()
 
 # general
 option(LLAMA_STATIC                     "llama: static link libraries"                          OFF)
-option(LLAMA_NATIVE                     "llama: enable -march=native flag"                      OFF)
+option(LLAMA_NATIVE                     "llama: enable -march=native flag"                      ON)
 option(LLAMA_LTO                        "llama: enable link time optimization"                  OFF)
 
 # debug
@@ -58,15 +58,21 @@ option(LLAMA_SANITIZE_ADDRESS           "llama: enable address sanitizer"       
 option(LLAMA_SANITIZE_UNDEFINED         "llama: enable undefined sanitizer"                     OFF)
 
 # instruction set specific
-option(LLAMA_AVX                        "llama: enable AVX"                                     ON)
-option(LLAMA_AVX2                       "llama: enable AVX2"                                    ON)
-option(LLAMA_AVX512                     "llama: enable AVX512"                                  OFF)
-option(LLAMA_AVX512_VBMI                "llama: enable AVX512-VBMI"                             OFF)
-option(LLAMA_AVX512_VNNI                "llama: enable AVX512-VNNI"                             OFF)
-option(LLAMA_FMA                        "llama: enable FMA"                                     ON)
+if (LLAMA_NATIVE)
+    set(INS_ENB OFF)
+else()
+    set(INS_ENB ON)
+endif()
+
+option(LLAMA_AVX                             "llama: enable AVX"                                ${INS_ENB})
+option(LLAMA_AVX2                            "llama: enable AVX2"                               ${INS_ENB})
+option(LLAMA_AVX512                          "llama: enable AVX512"                             OFF)
+option(LLAMA_AVX512_VBMI                     "llama: enable AVX512-VBMI"                        OFF)
+option(LLAMA_AVX512_VNNI                     "llama: enable AVX512-VNNI"                        OFF)
+option(LLAMA_FMA                             "llama: enable FMA"                                ${INS_ENB})
 # in MSVC F16C is implied with AVX2/AVX512
 if (NOT MSVC)
-    option(LLAMA_F16C                   "llama: enable F16C"                                    ON)
+    option(LLAMA_F16C                        "llama: enable F16C"                               ${INS_ENB})
 endif()
 
 # 3rd party libs
@@ -76,6 +82,7 @@ set(LLAMA_BLAS_VENDOR "Generic" CACHE STRING "llama: BLAS library vendor")
 option(LLAMA_CUBLAS                          "llama: use CUDA"                                  OFF)
 #option(LLAMA_CUDA_CUBLAS                     "llama: use cuBLAS for prompt processing"          OFF)
 option(LLAMA_CUDA_FORCE_DMMV                 "llama: use dmmv instead of mmvq CUDA kernels"     OFF)
+option(LLAMA_CUDA_FORCE_MMQ                  "llama: use mmq kernels instead of cuBLAS"         OFF)
 set(LLAMA_CUDA_DMMV_X      "32" CACHE STRING "llama: x stride for dmmv CUDA kernels")
 set(LLAMA_CUDA_MMV_Y        "1" CACHE STRING "llama: y block size for mmv CUDA kernels")
 option(LLAMA_CUDA_F16                        "llama: use 16 bit floats for some calculations"   OFF)
@@ -87,7 +94,6 @@ option(LLAMA_CLBLAST                         "llama: use CLBlast"               
 option(LLAMA_METAL                           "llama: use Metal"                                 ${LLAMA_METAL_DEFAULT})
 option(LLAMA_METAL_NDEBUG                    "llama: disable Metal debugging"                   OFF)
 option(LLAMA_MPI                             "llama: use MPI"                                   OFF)
-option(LLAMA_K_QUANTS                        "llama: use k-quants"                              ON)
 option(LLAMA_QKK_64                          "llama: use super-block size of 64 for k-quants"   OFF)
 
 option(LLAMA_BUILD_TESTS                "llama: build tests"    ${LLAMA_STANDALONE})
@@ -271,13 +277,8 @@ if (LLAMA_BLAS)
     endif()
 endif()
 
-if (LLAMA_K_QUANTS)
-    set(GGML_HEADERS_EXTRA k_quants.h)
-    set(GGML_SOURCES_EXTRA k_quants.c)
-    add_compile_definitions(GGML_USE_K_QUANTS)
-    if (LLAMA_QKK_64)
-        add_compile_definitions(GGML_QKK_64)
-    endif()
+if (LLAMA_QKK_64)
+    add_compile_definitions(GGML_QKK_64)
 endif()
 
 if (LLAMA_CUBLAS)
@@ -298,6 +299,9 @@ if (LLAMA_CUBLAS)
 #        endif()
         if (LLAMA_CUDA_FORCE_DMMV)
             add_compile_definitions(GGML_CUDA_FORCE_DMMV)
+        endif()
+        if (LLAMA_CUDA_FORCE_MMQ)
+            add_compile_definitions(GGML_CUDA_FORCE_MMQ)
         endif()
         add_compile_definitions(GGML_CUDA_DMMV_X=${LLAMA_CUDA_DMMV_X})
         add_compile_definitions(GGML_CUDA_MMV_Y=${LLAMA_CUDA_MMV_Y})
@@ -325,6 +329,7 @@ if (LLAMA_CUBLAS)
             set(CMAKE_CUDA_ARCHITECTURES "60;61;70") # needed for f16 CUDA intrinsics
         else()
             set(CMAKE_CUDA_ARCHITECTURES "52;61;70") # lowest CUDA 12 standard + lowest for integer intrinsics
+            #set(CMAKE_CUDA_ARCHITECTURES "") # use this to compile much faster, but only F16 models work
         endif()
     endif()
     message(STATUS "Using CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
@@ -343,8 +348,9 @@ if (LLAMA_MPI)
         set(GGML_SOURCES_MPI ggml-mpi.c ggml-mpi.h)
         add_compile_definitions(GGML_USE_MPI)
         add_compile_definitions(${MPI_C_COMPILE_DEFINITIONS})
-        set(cxx_flags ${cxx_flags} -Wno-cast-qual)
-        set(c_flags   ${c_flags}   -Wno-cast-qual)
+        if (NOT MSVC)
+            add_compile_options(-Wno-cast-qual)
+        endif()
         set(LLAMA_EXTRA_LIBS     ${LLAMA_EXTRA_LIBS}     ${MPI_C_LIBRARIES})
         set(LLAMA_EXTRA_INCLUDES ${LLAMA_EXTRA_INCLUDES} ${MPI_C_INCLUDE_DIRS})
         # Even if you're only using the C header, C++ programs may bring in MPI
@@ -397,6 +403,9 @@ if (LLAMA_HIPBLAS)
         if (LLAMA_CUDA_FORCE_DMMV)
             target_compile_definitions(ggml-rocm PRIVATE GGML_CUDA_FORCE_DMMV)
         endif()
+        if (LLAMA_CUDA_FORCE_MMQ)
+            target_compile_definitions(ggml-rocm PRIVATE GGML_CUDA_FORCE_MMQ)
+        endif()
         target_compile_definitions(ggml-rocm PRIVATE GGML_CUDA_DMMV_X=${LLAMA_CUDA_DMMV_X})
         target_compile_definitions(ggml-rocm PRIVATE GGML_CUDA_MMV_Y=${LLAMA_CUDA_MMV_Y})
         target_compile_definitions(ggml-rocm PRIVATE K_QUANTS_PER_ITERATION=${LLAMA_CUDA_KQUANTS_ITER})
@@ -414,42 +423,55 @@ endif()
 
 if (LLAMA_ALL_WARNINGS)
     if (NOT MSVC)
-        set(c_flags
-            -Wall
-            -Wextra
-            -Wpedantic
-            -Wcast-qual
-            -Wdouble-promotion
-            -Wshadow
-            -Wstrict-prototypes
-            -Wpointer-arith
-            -Wmissing-prototypes
-            -Werror=implicit-int
-            -Wno-unused-function
-        )
-        set(cxx_flags
-            -Wall
-            -Wextra
-            -Wpedantic
-            -Wcast-qual
-            -Wmissing-declarations
-            -Wno-unused-function
-            -Wno-multichar
-        )
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-            # g++ only
-            set(cxx_flags ${cxx_flags} -Wno-format-truncation -Wno-array-bounds)
+        set(warning_flags -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function)
+        set(c_flags -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration)
+        set(cxx_flags -Wmissing-declarations -Wmissing-noreturn)
+        set(host_cxx_flags "")
+
+        if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+            set(warning_flags ${warning_flags} -Wunreachable-code-break -Wunreachable-code-return)
+            set(host_cxx_flags ${host_cxx_flags} -Wmissing-prototypes -Wextra-semi)
+
+            if (
+                (CMAKE_C_COMPILER_ID STREQUAL "Clang"      AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 3.8.0) OR
+                (CMAKE_C_COMPILER_ID STREQUAL "AppleClang" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 7.3.0)
+            )
+                set(c_flags ${c_flags} -Wdouble-promotion)
+            endif()
+        elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            set(c_flags ${c_flags} -Wdouble-promotion)
+            set(host_cxx_flags ${host_cxx_flags} -Wno-array-bounds)
+
+            if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 7.1.0)
+                set(host_cxx_flags ${host_cxx_flags} -Wno-format-truncation)
+            endif()
+            if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8.1.0)
+                set(host_cxx_flags ${host_cxx_flags} -Wextra-semi)
+            endif()
         endif()
     else()
         # todo : msvc
     endif()
 
-    add_compile_options(
-            "$<$<COMPILE_LANGUAGE:C>:${c_flags}>"
-            "$<$<COMPILE_LANGUAGE:CXX>:${cxx_flags}>"
-    )
+    set(c_flags   ${c_flags}   ${warning_flags})
+    set(cxx_flags ${cxx_flags} ${warning_flags})
+    add_compile_options("$<$<COMPILE_LANGUAGE:C>:${c_flags}>"
+                        "$<$<COMPILE_LANGUAGE:CXX>:${cxx_flags}>"
+                        "$<$<COMPILE_LANGUAGE:CXX>:${host_cxx_flags}>")
 
 endif()
+
+if (NOT MSVC)
+    set(cuda_flags -Wno-pedantic)
+endif()
+set(cuda_flags ${cxx_flags} -use_fast_math ${cuda_flags})
+
+list(JOIN host_cxx_flags " " cuda_host_flags)  # pass host compiler flags as a single argument
+if (NOT cuda_host_flags STREQUAL "")
+    set(cuda_flags ${cuda_flags} -Xcompiler ${cuda_host_flags})
+endif()
+
+add_compile_options("$<$<COMPILE_LANGUAGE:CUDA>:${cuda_flags}>")
 
 if (WIN32)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -489,9 +511,6 @@ if (NOT MSVC)
     endif()
     if (LLAMA_GPROF)
         add_compile_options(-pg)
-    endif()
-    if (LLAMA_NATIVE)
-        add_compile_options(-march=native)
     endif()
 endif()
 
@@ -547,6 +566,9 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(x86_64|i686|AMD64)$" OR "${CMAKE_GE
             add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/arch:AVX>)
         endif()
     else()
+        if (LLAMA_NATIVE)
+            add_compile_options(-march=native)
+        endif()
         if (LLAMA_F16C)
             add_compile_options(-mf16c)
         endif()
@@ -643,6 +665,10 @@ add_library(ggml OBJECT
             ggml.h
             ggml-alloc.c
             ggml-alloc.h
+            ggml-backend.c
+            ggml-backend.h
+            ggml-quants.c
+            ggml-quants.h
             ${GGML_SOURCES_CUDA} ${GGML_HEADERS_CUDA}
             ${GGML_SOURCES_OPENCL} ${GGML_HEADERS_OPENCL}
             ${GGML_SOURCES_METAL} ${GGML_HEADERS_METAL}
@@ -704,6 +730,7 @@ set(LLAMA_BIN_INSTALL_DIR ${CMAKE_INSTALL_BINDIR}
 set(LLAMA_BUILD_NUMBER ${BUILD_NUMBER})
 set(LLAMA_BUILD_COMMIT ${BUILD_COMMIT})
 set(LLAMA_INSTALL_VERSION 0.0.${BUILD_NUMBER})
+get_directory_property(LLAMA_TRANSIENT_DEFINES COMPILE_DEFINITIONS)
 
 configure_package_config_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/scripts/LlamaConfig.cmake.in

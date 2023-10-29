@@ -51,6 +51,9 @@
         };
         llama-python =
           pkgs.python3.withPackages (ps: with ps; [ numpy sentencepiece ]);
+        # TODO(Green-Sky): find a better way to opt-into the heavy ml python runtime
+        llama-python-extra =
+          pkgs.python3.withPackages (ps: with ps; [ numpy sentencepiece torchWithoutCuda transformers ]);
         postPatch = ''
           substituteInPlace ./ggml-metal.m \
             --replace '[bundle pathForResource:@"ggml-metal" ofType:@"metal"];' "@\"$out/bin/ggml-metal.metal\";"
@@ -62,7 +65,7 @@
           mkdir -p $out/include
           cp ${src}/llama.h $out/include/
         '';
-        cmakeFlags = [ "-DLLAMA_BUILD_SERVER=ON" "-DLLAMA_MPI=ON" "-DBUILD_SHARED_LIBS=ON" "-DCMAKE_SKIP_BUILD_RPATH=ON" ];
+        cmakeFlags = [ "-DLLAMA_NATIVE=OFF" "-DLLAMA_BUILD_SERVER=ON" "-DBUILD_SHARED_LIBS=ON" "-DCMAKE_SKIP_BUILD_RPATH=ON" ];
       in
       {
         packages.default = pkgs.stdenv.mkDerivation {
@@ -124,6 +127,10 @@
         apps.default = self.apps.${system}.llama;
         devShells.default = pkgs.mkShell {
           buildInputs = [ llama-python ];
+          packages = nativeBuildInputs ++ osSpecific;
+        };
+        devShells.extra = pkgs.mkShell {
+          buildInputs = [ llama-python-extra ];
           packages = nativeBuildInputs ++ osSpecific;
         };
       });
