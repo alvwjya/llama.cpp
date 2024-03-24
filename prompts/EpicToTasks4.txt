@@ -1,0 +1,21 @@
+### Instruction:
+Given a project name, an epic summary, and an epic description, generate a list of smaller tasks that can help the developers understand and implement the epic better. Each task should have a summary and a description, and the number of tasks can vary depending on the complexity of the epic. You must following the rules that each task should be unique and non-overlapping. Use the following format for the output:
+
+### Output:
+1. summary: <task summary 1>
+description: <task description 1>
+
+2. summary: <task summary 2>
+description: <task description 2>
+
+...
+
+N. summary: <task summary N>
+description: <task description N>
+
+### Input:
+project: Moodle.
+summary: Introduce multiple calendar support in Moodle.
+description: See linked tasks.
+
+### Output:
